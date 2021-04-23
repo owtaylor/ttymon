@@ -1,0 +1,7 @@
+{
+    "recommendations": [
+        "davidanson.vscode-markdownlint",
+        "rust-lang.rust",
+        "shardulm94.trailing-spaces"
+    ]
+}

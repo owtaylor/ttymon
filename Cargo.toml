@@ -1,0 +1,20 @@
+[package]
+name = "ttymon"
+version = "0.1.0"
+authors = ["Owen W. Taylor <otaylor@fishsoup.net>"]
+edition = "2018"
+
+[dependencies]
+dirs = "3.0.1"
+env_logger = "0.8.3"
+lazy_static = "1.4.0"
+log = "0.4"
+netlink-sys = "0.6.0"
+netlink-packet-sock-diag = "0.1.0"
+regex = "1"
+nix = "0.20.0"
+vte = "0.10.1"
+
+[patch.crates-io]
+# https://github.com/little-dude/netlink/pull/159
+netlink-packet-sock-diag = { git = 'https://github.com/owtaylor/netlink', branch = 'unix-request-family' }
