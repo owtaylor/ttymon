@@ -1,18 +1,18 @@
-use std::path::Path;
 use nix::errno::Errno;
-use nix::fcntl::{OFlag, open};
-use nix::pty::{grantpt, posix_openpt, ptsname, PtyMaster, unlockpt};
-use nix::unistd::{close, dup2, setsid, read, write};
-use nix::sys::epoll::{EpollEvent, EpollFlags, EpollOp, epoll_create, epoll_ctl, epoll_wait};
+use nix::fcntl::{open, OFlag};
+use nix::pty::{grantpt, posix_openpt, ptsname, unlockpt, PtyMaster};
+use nix::sys::epoll::{epoll_create, epoll_ctl, epoll_wait, EpollEvent, EpollFlags, EpollOp};
 use nix::sys::stat::Mode;
 use nix::sys::termios;
-use std::io;
+use nix::unistd::{close, dup2, read, setsid, write};
 use std::cmp::min;
 use std::convert::TryInto;
+use std::io;
+use std::os::unix::io::AsRawFd;
 use std::os::unix::io::RawFd;
-use std::process::Command;
 use std::os::unix::process::CommandExt;
-use std::os::unix::io::{AsRawFd};
+use std::path::Path;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use crate::filter::Filter;
@@ -26,7 +26,7 @@ const STDIN: RawFd = 0;
 const STDOUT: RawFd = 1;
 
 struct RawInput {
-    orig_attr: termios::Termios
+    orig_attr: termios::Termios,
 }
 
 impl RawInput {
@@ -36,7 +36,7 @@ impl RawInput {
         termios::cfmakeraw(&mut new_attr);
         termios::tcsetattr(0, termios::SetArg::TCSAFLUSH, &new_attr)?;
 
-        Ok(RawInput{ orig_attr })
+        Ok(RawInput { orig_attr })
     }
 }
 
@@ -53,8 +53,8 @@ fn write_all(fd: RawFd, buf: &[u8]) -> nix::Result<()> {
     while written < buf.len() {
         match write(fd, &buf[written..]) {
             Ok(write_count) => written += write_count,
-            Err(nix::Error::Sys(Errno::EINTR)) => {},
-            Err(e) => { return Err(e) },
+            Err(nix::Error::Sys(Errno::EINTR)) => {}
+            Err(e) => return Err(e),
         }
     }
 
@@ -68,16 +68,19 @@ struct Buffer {
 
 impl Buffer {
     fn new() -> Self {
-        return Buffer { buf: vec![0; 4096], count: 0 };
+        return Buffer {
+            buf: vec![0; 4096],
+            count: 0,
+        };
     }
 
     fn fill(&mut self, fd: RawFd) -> nix::Result<bool> {
         match read(fd, &mut self.buf[self.count..]) {
-            Ok(0) => { Ok(false) },
+            Ok(0) => Ok(false),
             Ok(count) => {
                 self.count += count;
                 Ok(true)
-            },
+            }
             Err(e) => Err(e),
         }
     }
@@ -96,7 +99,10 @@ struct FilteredBuffer {
 
 impl FilteredBuffer {
     fn new() -> Self {
-        return FilteredBuffer { raw: Buffer::new(), filter: Filter::new() };
+        return FilteredBuffer {
+            raw: Buffer::new(),
+            filter: Filter::new(),
+        };
     }
 
     fn fill(&mut self, fd: RawFd) -> nix::Result<bool> {
@@ -141,7 +147,12 @@ impl Pty {
         // Try to open the slave
         let peer_fd = open(Path::new(&peer_name), OFlag::O_RDWR, Mode::empty())?;
 
-        Ok(Pty { master_fd, peer_fd, check_interval: MIN_CHECK_INTERVAL, last_check_time: None })
+        Ok(Pty {
+            master_fd,
+            peer_fd,
+            check_interval: MIN_CHECK_INTERVAL,
+            last_check_time: None,
+        })
     }
 
     fn child_setup(peer_fd: RawFd) -> nix::Result<()> {
@@ -169,11 +180,14 @@ impl Pty {
 
         let peer_fd = self.peer_fd;
         unsafe {
-            proc.pre_exec(move || {
-                match Self::child_setup(peer_fd) {
-                    Ok(()) => Ok(()),
-                    Err(nix::Error::Sys(e)) => return Err(e.into()),
-                    Err(e) => return Err(io::Error::new(io::ErrorKind::Other, format!("Spawn failed: {}", e))),
+            proc.pre_exec(move || match Self::child_setup(peer_fd) {
+                Ok(()) => Ok(()),
+                Err(nix::Error::Sys(e)) => return Err(e.into()),
+                Err(e) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Spawn failed: {}", e),
+                    ))
                 }
             });
         }
@@ -184,7 +198,10 @@ impl Pty {
         Ok(child.id())
     }
 
-    fn maybe_check<A>(&mut self, actions: &mut A, from_child: &mut FilteredBuffer) -> Duration where A: PtyActions {
+    fn maybe_check<A>(&mut self, actions: &mut A, from_child: &mut FilteredBuffer) -> Duration
+    where
+        A: PtyActions,
+    {
         let now = Instant::now();
         let next_check_time = if let Some(last_check_time) = self.last_check_time {
             last_check_time + self.check_interval
@@ -200,8 +217,10 @@ impl Pty {
             from_child.filter.set_out_window_title(&out_window_title);
             let _ = from_child.flush(STDOUT);
 
-            self.check_interval = min(MAX_CHECK_INTERVAL,
-                                      self.check_interval * CHECK_INTERVAL_MULTIPLIER);
+            self.check_interval = min(
+                MAX_CHECK_INTERVAL,
+                self.check_interval * CHECK_INTERVAL_MULTIPLIER,
+            );
             self.last_check_time = Some(now);
             self.check_interval
         } else {
@@ -209,7 +228,10 @@ impl Pty {
         }
     }
 
-    pub fn handle<A>(&mut self, actions: &mut A) -> nix::Result<()> where A: PtyActions {
+    pub fn handle<A>(&mut self, actions: &mut A) -> nix::Result<()>
+    where
+        A: PtyActions,
+    {
         let raw_input = RawInput::setup();
         if let Err(e) = raw_input {
             println!("Can't setup raw input: {}", e);
@@ -223,7 +245,7 @@ impl Pty {
         let mut to_child = Buffer::new();
 
         let mut event = EpollEvent::new(EpollFlags::EPOLLIN, 0);
-        epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, master_fd,  &mut event)?;
+        epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, master_fd, &mut event)?;
         let mut event = EpollEvent::new(EpollFlags::EPOLLIN, 1);
         epoll_ctl(epoll_fd, EpollOp::EpollCtlAdd, STDIN, &mut event)?;
 
@@ -232,12 +254,17 @@ impl Pty {
         while !done {
             let remaining = self.maybe_check(actions, &mut from_child);
 
-            let event_count = epoll_wait(epoll_fd, &mut events, remaining.as_millis().try_into().unwrap())?;
+            let event_count = epoll_wait(
+                epoll_fd,
+                &mut events,
+                remaining.as_millis().try_into().unwrap(),
+            )?;
             for event in &events[0..event_count] {
                 match event.data() {
                     0 => {
-                        if event.events().contains(EpollFlags::EPOLLIN) ||
-                               event.events().contains(EpollFlags::EPOLLHUP) {
+                        if event.events().contains(EpollFlags::EPOLLIN)
+                            || event.events().contains(EpollFlags::EPOLLHUP)
+                        {
                             if from_child.fill(master_fd)? {
                                 from_child.flush(STDOUT)?;
                                 self.check_interval = MIN_CHECK_INTERVAL;
@@ -245,18 +272,19 @@ impl Pty {
                                 done = true;
                             }
                         }
-                    },
+                    }
                     1 => {
-                        if event.events().contains(EpollFlags::EPOLLIN) ||
-                               event.events().contains(EpollFlags::EPOLLHUP) {
+                        if event.events().contains(EpollFlags::EPOLLIN)
+                            || event.events().contains(EpollFlags::EPOLLHUP)
+                        {
                             if to_child.fill(STDIN)? {
                                 to_child.flush(master_fd)?;
                             } else {
                                 done = true;
                             }
                         }
-                    },
-                    _ => ()
+                    }
+                    _ => (),
                 }
             }
         }

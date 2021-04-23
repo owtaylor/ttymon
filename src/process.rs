@@ -1,7 +1,7 @@
 use regex::Regex;
-use std::path::{Path, PathBuf};
 use std::fs;
 use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 lazy_static! {
@@ -12,37 +12,39 @@ lazy_static! {
 #[derive(Debug)]
 pub struct Process {
     pid: i32,
-    proc_path: std::path::PathBuf
+    proc_path: std::path::PathBuf,
 }
 
 struct ProcessIterator {
-    read_dir: fs::ReadDir
+    read_dir: fs::ReadDir,
 }
 
 impl ProcessIterator {
     fn new() -> io::Result<ProcessIterator> {
         Ok(ProcessIterator {
-            read_dir: fs::read_dir(Path::new("/proc"))?
+            read_dir: fs::read_dir(Path::new("/proc"))?,
         })
     }
 }
 
 impl Iterator for ProcessIterator {
-    type Item =  io::Result<Process>;
+    type Item = io::Result<Process>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let entry = match self.read_dir.next() {
                 Some(Ok(x)) => x,
-                Some(Err(e)) => { return Some(Err(e)) },
-                None => { return None; }
+                Some(Err(e)) => return Some(Err(e)),
+                None => {
+                    return None;
+                }
             };
 
             if let Some(file_name) = entry.file_name().to_str() {
                 if ALL_NUMBERS_RE.is_match(file_name) {
                     return Some(Ok(Process {
                         pid: file_name.parse().unwrap(),
-                        proc_path: entry.path()
+                        proc_path: entry.path(),
                     }));
                 }
             }
@@ -54,7 +56,7 @@ pub struct Args(Vec<u8>);
 
 impl<'a> IntoIterator for &'a Args {
     type Item = &'a [u8];
-    type IntoIter = std::slice::Split<'a, u8, fn(&u8) -> bool> ;
+    type IntoIter = std::slice::Split<'a, u8, fn(&u8) -> bool>;
 
     fn into_iter(self) -> std::slice::Split<'a, u8, fn(&u8) -> bool> {
         self.0.split(|x| *x == 0)
@@ -82,39 +84,46 @@ impl StatParser {
                 open_paren = i;
                 break;
             }
-        };
+        }
         let mut close_paren = NOT_FOUND;
         for i in (0..self.0.len() - 1).rev() {
             if self.0[i] == 0x29 && self.0[i + 1] == 0x20 {
                 close_paren = i;
                 break;
             }
-        };
+        }
 
-         if open_paren != NOT_FOUND && close_paren != NOT_FOUND {
+        if open_paren != NOT_FOUND && close_paren != NOT_FOUND {
             let mut fields: Vec<&'a [u8]> = vec![];
 
             fields.push(&self.0[0..open_paren - 1]);
             fields.push(&self.0[open_paren + 1..close_paren]);
-            let mut remaining: Vec<&'a [u8]> = self.0[close_paren + 2..].split(|x| *x == 0x20).collect();
+            let mut remaining: Vec<&'a [u8]> =
+                self.0[close_paren + 2..].split(|x| *x == 0x20).collect();
             fields.append(&mut remaining);
 
             Ok(fields)
         } else {
-            Err(io::Error::new(io::ErrorKind::Other, "Can't parse /proc/stat"))
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Can't parse /proc/stat",
+            ))
         }
-   }
+    }
 }
 
 impl Process {
     pub fn new(pid: i32) -> Self {
         Process {
             pid: pid,
-            proc_path: Path::new("/proc").join(pid.to_string())
+            proc_path: Path::new("/proc").join(pid.to_string()),
         }
     }
 
-    pub fn find<P>(pred: P) -> io::Result<Option<Process>> where P: Fn(&Process) -> bool {
+    pub fn find<P>(pred: P) -> io::Result<Option<Process>>
+    where
+        P: Fn(&Process) -> bool,
+    {
         for process in ProcessIterator::new()? {
             let process = process?;
             if pred(&process) {
@@ -157,7 +166,7 @@ impl Process {
             Ok(first_str.to_string())
         } else {
             Ok("???".to_string())
-        }
+        };
     }
 
     pub fn list_sockets(&self) -> io::Result<Vec<u32>> {
@@ -189,8 +198,10 @@ impl Process {
             }
         }
 
-        return Err(io::Error::new(io::ErrorKind::Other,
-                   format!("Can't parse {} from /proc/stat", name)));
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Can't parse {} from /proc/stat", name),
+        ));
     }
 
     pub fn parent(&self) -> io::Result<i32> {

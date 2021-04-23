@@ -1,4 +1,4 @@
-use vte::{Perform, Params, Parser};
+use vte::{Params, Parser, Perform};
 
 pub struct Filter {
     parser: Parser,
@@ -186,10 +186,9 @@ impl Perform for FilterState {
         } else {
             self.append_many(&ST);
         }
-     }
+    }
 
-    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8],
-                    _ignore: bool, action: char) {
+    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
         self.append_many(&CSI);
         self.append_params(params);
         self.append_many(intermediates);

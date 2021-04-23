@@ -8,7 +8,7 @@ pub struct ContainerInfo {
     pub container_id: String,
     pub container_name: String,
     pub image_id: String,
-    pub image_name: String
+    pub image_name: String,
 }
 
 fn have_common_member(a: &[u32], b: &[u32]) -> bool {
@@ -23,7 +23,7 @@ pub fn find_podman_peer(tty_pgrp: i32) -> io::Result<(i32, Option<ContainerInfo>
             Ok(s) => {
                 let mut new_sockets = s;
                 sockets.append(&mut new_sockets);
-            },
+            }
             Err(e) => {
                 println!("Failed to list sockets: {}", e);
             }
@@ -37,10 +37,10 @@ pub fn find_podman_peer(tty_pgrp: i32) -> io::Result<(i32, Option<ContainerInfo>
                 if peer != 0 {
                     peer_sockets.push(peer);
                 }
-            },
-            Err(e) => println!("{}: {:?}", socket_ino, e)
+            }
+            Err(e) => println!("{}: {:?}", socket_ino, e),
         }
-    };
+    }
 
     let conmon_pid = match Process::find(|process: &Process| {
         if let Ok(argv0) = process.argv0() {
@@ -54,8 +54,13 @@ pub fn find_podman_peer(tty_pgrp: i32) -> io::Result<(i32, Option<ContainerInfo>
         return false;
     }) {
         Ok(Some(process)) => process.pid(),
-        Ok(None) => return Err(io::Error::new(io::ErrorKind::Other, "Can't find podman peer")),
-        Err(e) => return Err(e)
+        Ok(None) => {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Can't find podman peer",
+            ))
+        }
+        Err(e) => return Err(e),
     };
 
     let container_info = get_container_info(conmon_pid)?;
@@ -68,9 +73,14 @@ pub fn find_podman_peer(tty_pgrp: i32) -> io::Result<(i32, Option<ContainerInfo>
         }
     }) {
         Ok(Some(process)) => Ok((process.pid(), container_info)),
-        Ok(None) => return Err(io::Error::new(io::ErrorKind::Other, "Can't find podman peer")),
-        Err(e) => return Err(e)
-    }
+        Ok(None) => {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Can't find podman peer",
+            ))
+        }
+        Err(e) => return Err(e),
+    };
 }
 
 fn get_container_info_for_id(id: &[u8]) -> io::Result<Option<ContainerInfo>> {
@@ -83,7 +93,7 @@ fn get_container_info_for_id(id: &[u8]) -> io::Result<Option<ContainerInfo>> {
         .arg("{{ .Name }} {{ .Image }} {{ .ImageName }}")
         .output()?;
 
-        if output.status.success() {
+    if output.status.success() {
         if let Ok(str_output) = String::from_utf8(output.stdout) {
             let fields: Vec<&str> = str_output.split(" ").collect();
             if fields.len() == 3 {
@@ -91,7 +101,7 @@ fn get_container_info_for_id(id: &[u8]) -> io::Result<Option<ContainerInfo>> {
                     container_id: String::from(container_id),
                     container_name: String::from(fields[0]),
                     image_id: String::from(fields[1]),
-                    image_name: String::from(fields[2])
+                    image_name: String::from(fields[2]),
                 }));
             }
         }
@@ -99,7 +109,6 @@ fn get_container_info_for_id(id: &[u8]) -> io::Result<Option<ContainerInfo>> {
 
     return Ok(None);
 }
-
 
 fn get_container_info(conmon_pid: i32) -> io::Result<Option<ContainerInfo>> {
     let process = Process::new(conmon_pid);
@@ -111,7 +120,7 @@ fn get_container_info(conmon_pid: i32) -> io::Result<Option<ContainerInfo>> {
                 if let Some(id) = arg_iter.next() {
                     return get_container_info_for_id(id);
                 }
-            },
+            }
             Some(_) => (),
             None => break,
         }

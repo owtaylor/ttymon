@@ -15,7 +15,7 @@
 //   * A GroupNode can change from having no known SessionNode to having a known
 //     SessionNode, and (less likely) vice-versa.
 
-use crate::podman::{ContainerInfo, find_podman_peer};
+use crate::podman::{find_podman_peer, ContainerInfo};
 use crate::process::Process;
 use std::fmt;
 use std::path::PathBuf;
@@ -36,9 +36,7 @@ impl SessionNode {
         Self {
             pid,
             container_info,
-            state: Mutex::new(SessionNodeState {
-                child: None,
-             })
+            state: Mutex::new(SessionNodeState { child: None }),
         }
     }
 
@@ -47,7 +45,7 @@ impl SessionNode {
             let mut state = self.state.lock().unwrap();
             let changed = match &state.child {
                 Some(arc) => tty_pgrp != arc.pgrp,
-                None => true
+                None => true,
             };
             if changed {
                 state.child = Some(Arc::new(GroupNode::new(tty_pgrp)));
@@ -62,7 +60,7 @@ impl SessionNode {
         let state = self.state.lock().unwrap();
         match &state.child {
             Some(arc) => Some(arc.clone()),
-            None => None
+            None => None,
         }
     }
 }
@@ -78,7 +76,10 @@ struct GroupNode {
 
 impl GroupNode {
     fn new(pgrp: i32) -> Self {
-        Self { pgrp, state: Mutex::new(GroupNodeState { child: None }) }
+        Self {
+            pgrp,
+            state: Mutex::new(GroupNodeState { child: None }),
+        }
     }
 
     fn update(&self) {
@@ -97,7 +98,7 @@ impl GroupNode {
             let mut state = self.state.lock().unwrap();
             let changed = match &state.child {
                 Some(arc) => child_pid != arc.pid,
-                None => true
+                None => true,
             };
             if changed {
                 state.child = Some(Arc::new(SessionNode::new(child_pid, container_info)));
@@ -112,7 +113,7 @@ impl GroupNode {
         let state = self.state.lock().unwrap();
         match &state.child {
             Some(arc) => Some(arc.clone()),
-            None => None
+            None => None,
         }
     }
 }
@@ -130,8 +131,8 @@ impl TerminalState {
             root: Arc::new(SessionNode::new(root_pid, None)),
             container_info: Mutex::new(None),
             foreground_argv0: Mutex::new(String::from("")),
-            foreground_cwd: Mutex::new(PathBuf::new())
-        }
+            foreground_cwd: Mutex::new(PathBuf::new()),
+        };
     }
 
     pub fn update(&self) {

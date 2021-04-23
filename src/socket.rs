@@ -1,10 +1,7 @@
 use netlink_packet_sock_diag::{
     constants::*,
-    unix::{UnixRequest, ShowFlags, StateFlags, nlas::Nla},
-    NetlinkHeader,
-    NetlinkMessage,
-    NetlinkPayload,
-    SockDiagMessage,
+    unix::{nlas::Nla, ShowFlags, StateFlags, UnixRequest},
+    NetlinkHeader, NetlinkMessage, NetlinkPayload, SockDiagMessage,
 };
 use netlink_sys::{protocols::NETLINK_SOCK_DIAG, Socket, SocketAddr};
 use std::io;
@@ -22,9 +19,9 @@ pub fn get_socket_peer(socket_ino: u32) -> io::Result<u32> {
             state_flags: StateFlags::all(),
             inode: socket_ino,
             show_flags: ShowFlags::PEER,
-            cookie: [0xff; 8]
+            cookie: [0xff; 8],
         })
-        .into()
+        .into(),
     };
 
     packet.finalize();
@@ -51,19 +48,26 @@ pub fn get_socket_peer(socket_ino: u32) -> io::Result<u32> {
                     let mut port: u32 = 0;
                     for nla in response.nlas {
                         match nla {
-                            Nla::Peer(x) => { port = x; },
-                            _ => ()
+                            Nla::Peer(x) => {
+                                port = x;
+                            }
+                            _ => (),
                         }
                     }
                     return Ok(port);
-                },
-                NetlinkPayload::InnerMessage(_) |  NetlinkPayload::Done => {
-                    return Err(io::Error::new(io::ErrorKind::Other, "Unexpected response from netlink"));
-                },
-                NetlinkPayload::Error(err) =>
-                {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Netlink error: {}", err.code)));
-                },
+                }
+                NetlinkPayload::InnerMessage(_) | NetlinkPayload::Done => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "Unexpected response from netlink",
+                    ));
+                }
+                NetlinkPayload::Error(err) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Netlink error: {}", err.code),
+                    ));
+                }
                 NetlinkPayload::Overrun(_) => {
                     return Err(io::Error::new(io::ErrorKind::Other, "Netlink overrun"));
                 }
@@ -77,5 +81,8 @@ pub fn get_socket_peer(socket_ino: u32) -> io::Result<u32> {
         }
     }
 
-    return Err(io::Error::new(io::ErrorKind::Other, "Didn't get a response from netlink"));
+    return Err(io::Error::new(
+        io::ErrorKind::Other,
+        "Didn't get a response from netlink",
+    ));
 }
