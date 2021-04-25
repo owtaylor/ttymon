@@ -18,17 +18,12 @@
 use crate::podman::{find_podman_peer, ContainerInfo};
 use crate::process::Process;
 use std::fmt;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-
-struct SessionNodeState {
-    child: Option<Arc<GroupNode>>,
-}
+use std::path::{Path, PathBuf};
 
 struct SessionNode {
     pid: i32,
     container_info: Option<ContainerInfo>,
-    state: Mutex<SessionNodeState>,
+    child: Option<Box<GroupNode>>,
 }
 
 impl SessionNode {
@@ -36,53 +31,44 @@ impl SessionNode {
         Self {
             pid,
             container_info,
-            state: Mutex::new(SessionNodeState { child: None }),
+            child: None,
         }
     }
 
-    fn update(&self) {
+    fn update(&mut self) {
         if let Ok(tty_pgrp) = Process::new(self.pid).tty_process_group() {
-            let mut state = self.state.lock().unwrap();
-            let changed = match &state.child {
-                Some(arc) => tty_pgrp != arc.pgrp,
+            let changed = match &self.child {
+                Some(group) => tty_pgrp != group.pgrp,
                 None => true,
             };
             if changed {
-                state.child = Some(Arc::new(GroupNode::new(tty_pgrp)));
+                self.child = Some(Box::new(GroupNode::new(tty_pgrp)));
             }
         } else {
-            let mut state = self.state.lock().unwrap();
-            state.child = None
+            self.child = None
         }
     }
 
-    fn child(&self) -> Option<Arc<GroupNode>> {
-        let state = self.state.lock().unwrap();
-        match &state.child {
-            Some(arc) => Some(arc.clone()),
-            None => None,
-        }
+    fn child(&self) -> Option<&GroupNode> {
+        self.child.as_deref()
     }
-}
 
-struct GroupNodeState {
-    child: Option<Arc<SessionNode>>,
+    fn child_mut(&mut self) -> Option<&mut GroupNode> {
+        self.child.as_deref_mut()
+    }
 }
 
 struct GroupNode {
     pgrp: i32,
-    state: Mutex<GroupNodeState>,
+    child: Option<Box<SessionNode>>,
 }
 
 impl GroupNode {
     fn new(pgrp: i32) -> Self {
-        Self {
-            pgrp,
-            state: Mutex::new(GroupNodeState { child: None }),
-        }
+        Self { pgrp, child: None }
     }
 
-    fn update(&self) {
+    fn update(&mut self) {
         let mut child_pid = -1;
         let mut container_info: Option<ContainerInfo> = None;
         if let Ok(argv0) = Process::new(self.pgrp).argv0() {
@@ -95,122 +81,107 @@ impl GroupNode {
         }
 
         if child_pid != -1 {
-            let mut state = self.state.lock().unwrap();
-            let changed = match &state.child {
-                Some(arc) => child_pid != arc.pid,
+            let changed = match &self.child {
+                Some(session) => child_pid != session.pid,
                 None => true,
             };
             if changed {
-                state.child = Some(Arc::new(SessionNode::new(child_pid, container_info)));
+                self.child = Some(Box::new(SessionNode::new(child_pid, container_info)));
             }
         } else {
-            let mut state = self.state.lock().unwrap();
-            state.child = None
+            self.child = None
         }
     }
 
-    fn child(&self) -> Option<Arc<SessionNode>> {
-        let state = self.state.lock().unwrap();
-        match &state.child {
-            Some(arc) => Some(arc.clone()),
-            None => None,
-        }
+    fn child(&self) -> Option<&SessionNode> {
+        self.child.as_deref()
+    }
+
+    fn child_mut(&mut self) -> Option<&mut SessionNode> {
+        self.child.as_deref_mut()
     }
 }
 
 pub struct TerminalState {
-    root: Arc<SessionNode>,
-    container_info: Mutex<Option<ContainerInfo>>,
-    foreground_argv0: Mutex<String>,
-    foreground_cwd: Mutex<PathBuf>,
+    root: SessionNode,
+    container_info: Option<ContainerInfo>,
+    foreground_argv0: String,
+    foreground_cwd: PathBuf,
 }
 
 impl TerminalState {
     pub fn new(root_pid: i32) -> Self {
         return TerminalState {
-            root: Arc::new(SessionNode::new(root_pid, None)),
-            container_info: Mutex::new(None),
-            foreground_argv0: Mutex::new(String::from("")),
-            foreground_cwd: Mutex::new(PathBuf::new()),
+            root: SessionNode::new(root_pid, None),
+            container_info: None,
+            foreground_argv0: String::from(""),
+            foreground_cwd: PathBuf::new(),
         };
     }
 
-    pub fn update(&self) {
-        let mut session = self.root.clone();
-        let mut leaf_group: Option<Arc<GroupNode>> = None;
-        let mut container_session: Option<Arc<SessionNode>> = None;
+    pub fn update(&mut self) {
+        self.root.update();
+        let mut group = match self.root.child_mut() {
+            Some(group) => group,
+            None => {
+                self.container_info = None;
+                self.foreground_argv0 = String::new();
+                self.foreground_cwd = PathBuf::new();
+
+                return;
+            }
+        };
+
+        let mut group_pgrp: i32;
+        let mut container_info: Option<ContainerInfo> = None;
 
         loop {
-            if session.container_info.is_some() {
-                container_session = Some(session.clone());
-            }
-            session.update();
-            let group = match session.child() {
-                Some(arc) => arc,
-                None => break,
-            };
+            group_pgrp = group.pgrp;
             group.update();
-            leaf_group = Some(group.clone());
-            session = match group.child() {
-                Some(arc) => arc,
+            let session = match group.child_mut() {
+                Some(session) => session,
+                None => break,
+            };
+
+            session.update();
+            container_info = session.container_info.clone();
+            group = match session.child_mut() {
+                Some(group) => group,
                 None => break,
             };
         }
 
-        let mut foreground_argv0 = String::new();
-        let mut foreground_cwd = PathBuf::new();
-
-        if let Some(leaf_group) = leaf_group {
-            let proc = Process::new(leaf_group.pgrp);
-            if let Ok(argv0) = proc.argv0() {
-                foreground_argv0 = argv0;
-            }
-            if let Ok(cwd) = proc.cwd() {
-                foreground_cwd = cwd;
-            }
-        }
-
-        let container_info = container_session.and_then(|x| x.container_info.clone());
-
-        *(self.container_info.lock().unwrap()) = container_info;
-        *(self.foreground_argv0.lock().unwrap()) = foreground_argv0;
-        *(self.foreground_cwd.lock().unwrap()) = foreground_cwd;
+        let proc = Process::new(group_pgrp);
+        self.foreground_argv0 = proc.argv0().unwrap_or(String::new());
+        self.foreground_cwd = proc.cwd().unwrap_or(PathBuf::new());
+        self.container_info = container_info;
     }
 
-    pub fn container_info(&self) -> Option<ContainerInfo> {
-        self.container_info.lock().unwrap().clone()
+    pub fn container_info(&self) -> Option<&ContainerInfo> {
+        self.container_info.as_ref()
     }
 
-    pub fn foreground_argv0(&self) -> String {
-        {
-            let foreground_argv0 = self.foreground_argv0.lock().unwrap();
-            foreground_argv0.clone()
-        }
+    pub fn foreground_argv0(&self) -> &str {
+        self.foreground_argv0.as_str()
     }
 
-    pub fn foreground_cwd(&self) -> PathBuf {
-        {
-            let foreground_cwd = self.foreground_cwd.lock().unwrap();
-            foreground_cwd.clone()
-        }
+    pub fn foreground_cwd(&self) -> &Path {
+        self.foreground_cwd.as_path()
     }
 }
 
 impl fmt::Display for TerminalState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "TerminalState[")?;
-        let mut session = self.root.clone();
+        let mut session = &self.root;
         loop {
             write!(f, " S-{}", session.pid)?;
-            session.update();
             let group = match session.child() {
-                Some(arc) => arc,
+                Some(group) => group,
                 None => break,
             };
-            write!(f, " G-{}", group.pgrp)?;
-            group.update();
             session = match group.child() {
-                Some(arc) => arc,
+                Some(session) => session,
                 None => break,
             };
         }

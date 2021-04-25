@@ -41,7 +41,7 @@ impl PtyActions for Actions {
             None => String::from(""),
         };
 
-        let mut foreground_cwd = self.state.foreground_cwd();
+        let mut foreground_cwd = PathBuf::from(self.state.foreground_cwd());
         if let Ok(home_suffix) = foreground_cwd.strip_prefix(&self.home) {
             foreground_cwd = PathBuf::from("~").join(home_suffix);
         }
