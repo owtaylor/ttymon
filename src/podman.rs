@@ -25,7 +25,7 @@ pub fn find_podman_peer(tty_pgrp: i32) -> io::Result<(i32, Option<ContainerInfo>
                 sockets.append(&mut new_sockets);
             }
             Err(e) => {
-                println!("Failed to list sockets: {}", e);
+                info!("Failed to list sockets: {}", e);
             }
         }
     }
